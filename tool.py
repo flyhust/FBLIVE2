@@ -39,12 +39,15 @@ CANCEL: dict[str, threading.Event] = {}
 SERVER: ThreadingHTTPServer
 PORTAL_ORIGIN: str | None = None
 try:
+    import apify
     import dashboard
 except ModuleNotFoundError:  # tool.py loaded by path: resolve the module beside the source file
-    _spec = importlib.util.spec_from_file_location("dashboard", Path(__file__).with_name("dashboard.py"))
-    dashboard = importlib.util.module_from_spec(_spec)
-    sys.modules["dashboard"] = dashboard
-    _spec.loader.exec_module(dashboard)
+    for _name in ("apify", "dashboard"):
+        _spec = importlib.util.spec_from_file_location(_name, Path(__file__).with_name(_name + ".py"))
+        _module = importlib.util.module_from_spec(_spec)
+        sys.modules[_name] = _module
+        _spec.loader.exec_module(_module)
+    apify, dashboard = sys.modules["apify"], sys.modules["dashboard"]
 
 ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 UPLOAD_SUFFIXES = {".mp4", ".mkv", ".webm", ".mov", ".m4a", ".mp3", ".wav", ".ogg", ".flac", ".aac", ".txt", ".srt", ".vtt", ".json", ".csv"}
@@ -567,6 +570,36 @@ def run_pipeline(job_id, config):
             update(job_id, stage="整理逐字稿与留言", progress=None, message=f"已取得 {len(transcript)} 个逐字稿片段")
             write_json(directory / "transcript.json", transcript)
             comments = []
+            apify_csv = None
+            if config.get("use_apify") and url:
+                token = apify.load_token(DATA.parent)
+                limit = apify.check_limit(config.get("apify_limit"))
+                update(job_id, stage="通过 Apify 取留言", progress=None,
+                       message=f"正在向 Apify 请求最多 {limit} 条留言，这一步按用量计费。")
+                post = apify.fetch_post(url, token)
+                counts = apify.post_metrics(post)
+                for key, value in counts.items():
+                    if value is not None and metadata.get(key) is None:
+                        metadata[key] = value
+                if counts.get("like_count") is not None or counts.get("comment_count") is not None:
+                    metadata.setdefault("source", "Apify Facebook scraper 返回的字段")
+                # The post's publish time is the best available anchor when the user gave none.
+                published = post.get("time") or post.get("timestamp") or post.get("publishedAt")
+                if not config.get("start_time") and isinstance(published, str) and published.strip():
+                    config["start_time"] = published.strip()
+                    warnings.append("留言时间以贴文发布时间为起点对齐；这是推断的起点，不是确认的开播时刻。")
+                items = apify.fetch_comments(url, token, limit)
+                text, guessed = apify.comments_to_csv(items)
+                apify_csv = directory / "apify-comments.csv"
+                apify_csv.write_text(text, encoding="utf-8")
+                warnings.append(f"通过 Apify 取得 {len(items)} 条留言（上限 {limit}），按其用量计费；"
+                                "这是 Apify 当次返回的内容，不代表整场全部留言。")
+                if guessed:
+                    warnings.append(f"其中 {guessed} 条回复的归属按线程顺序推断，Apify 未直接给出父留言；"
+                                    "引用回复关系前请回页面核对。")
+                if comment_path:
+                    warnings.append("同时提供了 Apify 和本地 CSV，本次使用本地 CSV。")
+            comment_path = comment_path or apify_csv
             if comment_path:
                 comments, removed = parse_comments(comment_path, config.get("start_time", ""), config.get("offset", 0), job_id)
                 warnings.append(f"导入 {len(comments)} 条留言；去重／忽略空内容 {removed} 条，不代表整场全部留言。")
@@ -710,6 +743,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond({"models": [x["name"] for x in models], "available": True})
                 except Exception:
                     return self.respond({"models": [], "available": False})
+            if path == "/api/apify":
+                return self.respond({"configured": bool(apify.load_token(DATA.parent)),
+                                     "default_limit": apify.DEFAULT_LIMIT, "max_limit": apify.MAX_LIMIT,
+                                     "note": "按 Apify 的用量计费，约 US$1.40 / 1000 条留言；没有配置 APIFY_TOKEN 时此选项不可用。"})
             if path == "/api/comment-script":
                 return self.respond((ROOT / "scripts" / "collect-comments.js").read_text(encoding="utf-8"),
                                     content_type="text/plain; charset=utf-8")
@@ -799,6 +836,12 @@ class Handler(BaseHTTPRequestHandler):
                 for name in ("media", "transcript", "comments", "cookies"):
                     upload_path(config.get(name))
                 profile_config(config)
+                if config.get("use_apify"):
+                    if not config.get("url"):
+                        raise ValueError("Apify 需要直播链接才能抓留言。")
+                    if not apify.load_token(DATA.parent):
+                        raise ValueError("没有找到 APIFY_TOKEN。请在工具目录的 .env 里写一行 APIFY_TOKEN=你的令牌。")
+                    apify.check_limit(config.get("apify_limit"))
                 if config.get("asr_model") not in ALLOWED_MODELS:
                     raise ValueError("请选择有效的转录模型。")
                 if config.get("language") not in ("", "zh", "en", "ms", "yue", "ja", "ko"):

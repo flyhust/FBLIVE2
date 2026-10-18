@@ -61,7 +61,25 @@ Vercel 部署目录为 `web/`，不上传模型、录像、EXE、会话令牌或
 
 链接拿不到留言，下载器也不行。我试过 `facebook-scraper`：它依赖的 `m.facebook.com` 和 `mbasic.facebook.com` 现在直接返回 HTTP 400，对公开主页也返回 0 条，所以没有采用。
 
-现在的做法是浏览器脚本 [`scripts/collect-comments.js`](scripts/collect-comments.js)：
+有两条可用的路，按你愿不愿意付费选。
+
+### A. Apify（从链接直接抓，按量计费）
+
+勾选「高级设置」里的**通过 Apify 抓留言与互动数**。工具会调用 `apify/facebook-comments-scraper` 取留言和回复，再用 `apify/facebook-posts-scraper` 补 Like、留言数和分享数这些页面计数。
+
+令牌放在工具目录的 `.env` 里，一行即可，`.gitignore` 已经排除这个文件：
+
+```
+APIFY_TOKEN=你的令牌
+```
+
+改完重启工具，选项才会可用。令牌只在请求头里发给 Apify，不写进报告、导出和日志。Apify 按用量计费（留言约 US$1.40 / 1000 条），所以这个开关默认关闭，每次运行都要自己勾，并且有条数上限。
+
+两点如实说明：Apify 返回的回复只带层级、不带父留言 ID，所以回复归属是按线程顺序推断的，报告里会标出推断了多少条；没填直播开始时间时，工具用贴文发布时间当对齐起点，这也是推断，不是确认的开播时刻。
+
+### B. 浏览器脚本（免费，自己跑）
+
+另一条路是浏览器脚本 [`scripts/collect-comments.js`](scripts/collect-comments.js)：
 
 1. 在工具里点「留言 CSV」旁边的**复制留言采集脚本**
 2. 到你能正常看到留言的 Facebook 视频／贴文页面，按 F12 打开 Console，粘贴回车
