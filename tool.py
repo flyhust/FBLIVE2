@@ -673,6 +673,7 @@ def main():
     for folder in ("runs", "uploads", "models"):
         (DATA / folder).mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     os.environ.setdefault("HF_HOME", str(DATA / "models" / "huggingface"))
     logging.basicConfig(filename=DATA / "tool.log", level=logging.INFO, encoding="utf-8")

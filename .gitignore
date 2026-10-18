@@ -6,6 +6,7 @@ uploads/
 logs/
 *.log
 runtime-check.json
+THIRD_PARTY_NOTICES.txt
 # Credentials and local configuration
 .env
 .env.*
