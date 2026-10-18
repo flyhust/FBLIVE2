@@ -1,0 +1,26 @@
+# Local live recordings, transcripts, reports, models and logs
+FB_Live_Data/
+data/
+models/
+uploads/
+logs/
+*.log
+runtime-check.json
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+cookies*.txt
+*.pem
+*.key
+# Generated executables and build environment
+*.exe
+*.zip
+*.spec
+build/
+dist/
+.venv/
+.build-env/
+__pycache__/
+*.py[cod]
+.test-work/
