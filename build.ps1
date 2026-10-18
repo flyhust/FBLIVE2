@@ -10,7 +10,7 @@ $taskPython = Join-Path $PSScriptRoot '.build-env\Scripts\python.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
 & $taskPython scripts\make_notices.py
 if ($LASTEXITCODE -ne 0) { throw 'License notice generation failed.' }
-$taskName = if ($Online) { 'FB-Live-Analyzer-Online' } else { 'FB-Live-Analyzer' }
+$taskName = if ($Online) { 'FBLIVE2-Online' } else { 'FBLIVE2' }
 & $taskPython -m PyInstaller --noconfirm --onefile --windowed --name $taskName `
     --add-data "$PSScriptRoot\index.html;." `
     --add-data "$PSScriptRoot\analysis_templates.json;." `

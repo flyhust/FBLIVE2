@@ -1,4 +1,4 @@
-# Live Notes — Facebook 直播本地分析工具
+# FBLIVE2 — Facebook 直播本地分析工具
 
 Windows 本地工具，输入 Facebook 直播录像链接，或导入本地音视频／逐字稿，生成带时间戳的完整逐字稿与可追溯的内容复盘。
 
@@ -10,7 +10,7 @@ Vercel 部署目录为 `web/`，不上传模型、录像、EXE、会话令牌或
 
 ## 本地使用
 
-打包完成后，双击 `FB-Live-Analyzer.exe`，会自动打开本机浏览器界面。无需安装 Python，无需 API Key。源码运行方式见下文。
+打包完成后，双击 `FBLIVE2.exe`，会自动打开本机浏览器界面。无需安装 Python，无需 API Key。源码运行方式见下文。
 
 1. 输入 Facebook 录像链接，或导入 MP4、MP3 等本地音视频。
 2. 可选导入已有 SRT、VTT、TXT、JSON 逐字稿，以及留言 CSV。
@@ -83,7 +83,7 @@ py -3.12 -m venv .venv
 
 ## Windows 打包
 
-运行 `build.ps1`，产物位于 `dist/FB-Live-Analyzer.exe`。首次构建会下载 Python 依赖；`requirements-lock.txt` 固定本次实际验证的版本，其中 PyAV 固定为 16.1.0，以匹配 faster-whisper 的音频解码接口。语音模型不打进 EXE，在首次使用时下载到本地缓存。发布时请同时附上生成的 `THIRD_PARTY_NOTICES.txt`。
+运行 `build.ps1`，产物位于 `dist/FBLIVE2.exe`。首次构建会下载 Python 依赖；`requirements-lock.txt` 固定本次实际验证的版本，其中 PyAV 固定为 16.1.0，以匹配 faster-whisper 的音频解码接口。语音模型不打进 EXE，在首次使用时下载到本地缓存。发布时请同时附上生成的 `THIRD_PARTY_NOTICES.txt`。
 
 ## 开源组件
 
