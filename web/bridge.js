@@ -136,8 +136,11 @@ async function connectWorker(value) {
     updateConnectionUI();
     connectionMessage('正在连接你指定的本机工具…');
     const health = await localRequest('/api/health', {}, 12000);
-    if (typeof health.version !== 'string' || typeof health.data_dir !== 'string') {
+    if (typeof health.version !== 'string' || typeof health.data_dir !== 'string' || health.bridge_protocol !== 1) {
       throw Error('此地址未返回兼容的本地工具状态，请更新程序后重新配对。');
+    }
+    if (health.portal_origin !== location.origin) {
+      throw Error('本地启动器没有允许当前网页地址。请使用配套启动器打开正确的线上工作台。');
     }
     connected = true;
     saveConnection(value);
@@ -208,6 +211,17 @@ async function quitTool() {
   } catch (error) { toast(error.message); }
 }
 
+function consumePairingFragment() {
+  const fragment = location.hash;
+  if (!fragment) return false;
+  // A launcher can target a tab that already has this page open: hash-only
+  // navigation does not reload scripts, so handle it as a new pairing too.
+  history.replaceState(null, '', location.pathname + location.search);
+  try { connectWorker(parsePairingURL(location.origin + location.pathname + fragment)); }
+  catch (error) { connectionMessage(error.message, 'error'); }
+  return true;
+}
+
 function initializePortal() {
   const actions = {
     "showPage('work')": () => showPage('work'),
@@ -234,14 +248,8 @@ function initializePortal() {
   $('pairing-url').addEventListener('keydown', event => { if (event.key === 'Enter') connectWorker(); });
   $('worker-token').addEventListener('keydown', event => { if (event.key === 'Enter') connectWorker(); });
   updateConnectionUI();
-  // Remove the launch secret from the address bar before doing any network work.
-  const fragment = location.hash;
-  if (fragment) history.replaceState(null, '', location.pathname + location.search);
-  if (fragment) {
-    try { connectWorker(parsePairingURL(location.origin + location.pathname + fragment)); }
-    catch (error) { connectionMessage(error.message, 'error'); }
-    return;
-  }
+  window.addEventListener('hashchange', consumePairingFragment);
+  if (consumePairingFragment()) return;
   try {
     const saved = sessionStorage.getItem(CONNECTION_KEY);
     if (saved) { const value = JSON.parse(saved); connectWorker(validateConnection(value.base, value.token)); return; }
