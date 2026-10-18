@@ -1,0 +1,8 @@
+{
+  "sales": {"label": "商品销售", "detect": "商品|下单|下單|购买|購買|库存|庫存|带货|帶貨|order|discount", "goals": ["consult", "purchase"], "verified": "付款买家数、付款订单、实收金额（需订单数据）"},
+  "education": {"label": "课程／教学", "detect": "课程|課程|教学|教學|学习|學習|练习|練習|知识|知識|lesson|course", "goals": ["learn", "signup"], "verified": "报名、完成率、测验结果（需课程系统数据）"},
+  "service": {"label": "房产／服务", "detect": "房产|房產|看房|预约|預約|服务|服務|咨询服务|諮詢服務|appointment|property", "goals": ["consult", "appointment"], "verified": "预约、有效线索、成交（需 CRM 数据）"},
+  "brand": {"label": "品牌／新品", "detect": "品牌|新品|发布|發布|试用|試用|体验|體驗|brand|launch", "goals": ["discuss", "trial"], "verified": "链接点击、试用申请（需追踪数据）"},
+  "community": {"label": "访谈／社群", "detect": "访谈|訪談|嘉宾|嘉賓|社群|交流|社区|社區|interview|community", "goals": ["discuss", "participate"], "verified": "活动报名、社群加入（需活动或社群数据）"},
+  "entertainment": {"label": "娱乐／游戏", "detect": "游戏|遊戲|娱乐|娛樂|开黑|開黑|通关|通關|打怪|唱歌|game|gaming", "goals": ["participate", "support"], "verified": "关注、订阅、打赏（需平台后台数据）"}
+}

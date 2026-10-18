@@ -13,6 +13,7 @@ if ($LASTEXITCODE -ne 0) { throw 'License notice generation failed.' }
 $taskName = if ($Online) { 'FB-Live-Analyzer-Online' } else { 'FB-Live-Analyzer' }
 & $taskPython -m PyInstaller --noconfirm --onefile --windowed --name $taskName `
     --add-data "$PSScriptRoot\index.html;." `
+    --add-data "$PSScriptRoot\analysis_templates.json;." `
     --collect-all faster_whisper --collect-all ctranslate2 --collect-all av `
     --collect-all onnxruntime --collect-all yt_dlp --collect-all tokenizers `
     --collect-all huggingface_hub --exclude-module torch --exclude-module tensorflow `

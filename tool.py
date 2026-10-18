@@ -38,6 +38,14 @@ WORKER = threading.Semaphore(1)
 CANCEL: dict[str, threading.Event] = {}
 SERVER: ThreadingHTTPServer
 PORTAL_ORIGIN: str | None = None
+try:
+    import dashboard
+except ModuleNotFoundError:  # tool.py loaded by path: resolve the module beside the source file
+    _spec = importlib.util.spec_from_file_location("dashboard", Path(__file__).with_name("dashboard.py"))
+    dashboard = importlib.util.module_from_spec(_spec)
+    sys.modules["dashboard"] = dashboard
+    _spec.loader.exec_module(dashboard)
+
 ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 UPLOAD_SUFFIXES = {".mp4", ".mkv", ".webm", ".mov", ".m4a", ".mp3", ".wav", ".ogg", ".flac", ".aac", ".txt", ".srt", ".vtt", ".json", ".csv"}
 
@@ -69,7 +77,15 @@ def utc_now():
 def write_json(path: Path, obj):
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(obj, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-    temp.replace(path)
+    # On Windows an antivirus scan of the fresh temp file can hold it briefly and deny the rename.
+    for attempt in range(5):
+        try:
+            temp.replace(path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.2)
 
 
 def stamp(seconds: float, millis=False):
@@ -188,7 +204,16 @@ def parse_comments(path, start_time, offset, job_id):
         if seconds is not None:
             seconds -= offset
         user = get("user_id", "user", "username", "用户", "匿名用户id")
-        rows.append({"id": f"C{len(rows)+1:05}", "source_id": cid or None, "start": seconds,
+        role = get("role", "author_role", "身份", "角色").strip().lower()
+        if role in ("host", "主播", "直播主", "page", "owner"):
+            role = "host"
+        elif role in ("admin", "moderator", "管理员", "管理員", "小编", "小編"):
+            role = "admin"
+        elif role in ("viewer", "audience", "观众", "觀眾", "user"):
+            role = "viewer"
+        else:
+            role = None
+        rows.append({"id": f"C{len(rows)+1:05}", "source_id": cid or None, "start": seconds, "role": role,
                      "text": text, "user": hashlib.sha256((job_id+user).encode()).hexdigest()[:8] if user else None,
                      "parent_id": get("parent_id", "reply_to", "回复对象") or None})
     if not rows:
@@ -432,6 +457,39 @@ def export_report(report, kind):
                 if s:
                     lines.append(f"> {eid} · {stamp(s['start']) if s['start'] is not None else '无时间戳'} · {s['text']}")
             lines.append("")
+    board = report.get("dashboard") or {}
+    if board.get("profile"):
+        profile, overview = board["profile"], board["overview"]
+        def label(value):
+            return "未取得" if value in (None, "") else value
+        lines.extend(["## 直播类型与目标", "",
+                      f"类型：{profile['label']}（{profile['mode']}）",
+                      "目标：" + "、".join(dashboard.GOALS[g] for g in profile["goals"]),
+                      "需外部数据才能验证：" + profile["verified"], "",
+                      "## 直播总览", "",
+                      f"- 时长：{stamp(overview['duration']) if overview['duration'] else '未取得'}（{overview['duration_source']}）",
+                      f"- 观看：{label(overview['views'])} ｜ Like：{label(overview['likes'])} ｜ Reactions：{label(overview['reactions'])} ｜ 分享：{label(overview['shares'])}",
+                      f"- 已导入留言：{label(overview['imported_comments'])} ｜ 观众留言：{label(overview['audience_comments'])} ｜ 留言人数：{label(overview['audience_people'])}",
+                      "- " + board["coverage"]["note"], ""])
+        lines.extend(["## 内容地图", ""])
+        for section in board["content_map"]:
+            head = stamp(section["start"]) if section["start"] is not None else "无时间戳"
+            lines.extend([f"### {head} · {section['title']}", section["excerpt"], ""])
+        lines.extend(["## 观众洞察", ""])
+        for insight in board["insights"]:
+            lines.append(f"- {insight['title']}：{insight['count']} 条留言（人数 {label(insight['people'])}）")
+        lines.extend(["", "## 目标行动", ""])
+        for action in board["actions"]:
+            lines.append(f"- {action['title']}：匹配留言 {label(action['count'])} 条，人数 {label(action['people'])}，实际结果 未取得")
+        lines.extend(["", board["questions"]["note"], "", "## 复盘建议", ""])
+        for item in board["recommendations"] + board["clips"]:
+            lines.extend([f"### {item['title']}", item["detail"]])
+            for eid in item["evidence_ids"]:
+                row = evidence.get(eid)
+                if row:
+                    lines.append(f"> {eid} · {stamp(row['start']) if row['start'] is not None else '无时间戳'} · {row['text']}")
+            lines.append("")
+        lines.extend(["方法说明：" + board["method"], ""])
     lines.extend(["## 数据范围", *analysis["limitations"], *report["warnings"], "", "## 完整逐字稿", "", export_transcript(report["transcript"], "txt")])
     md = "\n".join(lines)
     if kind == "md":
@@ -448,6 +506,22 @@ def upload_path(value):
     if not path.is_file():
         raise ValueError("上传文件已不存在，请重新选择。")
     return path
+
+
+def profile_config(config):
+    return dashboard.validate_config({"live_type": (config.get("live_type") or "auto"),
+                                      "goals": config.get("goals") or [],
+                                      "goals_manual": bool(config.get("goals"))})
+
+
+def attach_dashboard(report, profile=None):
+    """A dashboard failure must not discard a finished transcript."""
+    try:
+        report["dashboard"] = dashboard.build_dashboard(report, profile or report.get("profile_config"))
+    except Exception as exc:
+        logging.exception("Dashboard build failed")
+        report["dashboard"] = {"error": "通用 Dashboard 未生成：" + str(exc)[:220]}
+    return report["dashboard"]
 
 
 def run_pipeline(job_id, config):
@@ -482,9 +556,12 @@ def run_pipeline(job_id, config):
                 warnings.append("未导入留言；Facebook 链接下载不等于取得留言或完整 Reactions／分享数据。")
             analysis = built_in_analysis(transcript, comments)
             title = config.get("title", "").strip() or metadata.get("title") or "直播复盘 · " + datetime.now().strftime("%Y-%m-%d %H:%M")
+            profile = profile_config(config)
             report = {"version": VERSION, "id": job_id, "created_at": utc_now(), "title": title, "url": url,
                       "metadata": metadata, "transcription": transcription, "transcript": transcript, "comments": comments,
-                      "analysis": analysis, "warnings": warnings}
+                      "analysis": analysis, "profile_config": profile, "warnings": warnings}
+            update(job_id, stage="生成通用 Dashboard", progress=None, message="按直播类型与目标整理六个模块")
+            attach_dashboard(report, profile)
             write_json(directory / "report.json", report)
             if config.get("ollama_model"):
                 try:
@@ -589,6 +666,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond({"models": [x["name"] for x in models], "available": True})
                 except Exception:
                     return self.respond({"models": [], "available": False})
+            if path == "/api/templates":
+                return self.respond({"goals": dashboard.GOALS,
+                                     "types": [{"id": k, "label": v["label"], "goals": v["goals"], "verified": v["verified"]}
+                                               for k, v in dashboard.TEMPLATES.items()]})
             if path == "/api/jobs":
                 with LOCK:
                     return self.respond({"jobs": sorted(JOBS.values(), key=lambda j: j["created_at"], reverse=True)})
@@ -663,6 +744,7 @@ class Handler(BaseHTTPRequestHandler):
                     validate_fb_url(config["url"].strip())
                 for name in ("media", "transcript", "comments"):
                     upload_path(config.get(name))
+                profile_config(config)
                 if config.get("asr_model") not in ALLOWED_MODELS:
                     raise ValueError("请选择有效的转录模型。")
                 if config.get("language") not in ("", "zh", "en", "ms", "yue", "ja", "ko"):
@@ -679,6 +761,20 @@ class Handler(BaseHTTPRequestHandler):
                     write_json(DATA / "runs" / job_id / "job.json", JOBS[job_id])
                 threading.Thread(target=run_pipeline, args=(job_id, config), daemon=True).start()
                 return self.respond({"id": job_id})
+            if path == "/api/profile":
+                job_id = config.get("id", "")
+                if not re.fullmatch(r"[a-f0-9]{16}", str(job_id)):
+                    raise ValueError("记录标识无效。")
+                report_path = DATA / "runs" / job_id / "report.json"
+                if not report_path.exists():
+                    raise ValueError("该记录还没有分析报告。")
+                profile = profile_config(config)
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                report["profile_config"] = profile
+                attach_dashboard(report, profile)
+                write_json(report_path, report)
+                (DATA / "runs" / job_id / "report.html").write_text(export_report(report, "html"), encoding="utf-8")
+                return self.respond({"id": job_id, "profile_config": profile, "dashboard": report["dashboard"]})
             if path == "/api/cancel":
                 CANCEL[config["id"]].set()
                 return self.respond({"ok": True})
