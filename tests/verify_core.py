@@ -100,6 +100,14 @@ try:
     assert '<script>malicious()</script>' not in html_export
     assert json.loads(call('/api/export/'+started['id']+'/json'))['transcript'][0]['text'] == segments[0]['text']
     assert (WORK/'data/runs'/started['id']/'report.html').is_file()
+    # The audio export only appears for a run that actually downloaded something.
+    try:
+        call('/api/export/'+started['id']+'/media')
+        raise AssertionError('media export must fail when no recording was downloaded')
+    except HTTPError as error:
+        assert error.code == 400, error
+    (WORK/'data/runs'/started['id']/'media.m4a').write_bytes(b'synthetic audio bytes')
+    assert call('/api/export/'+started['id']+'/media') == b'synthetic audio bytes'
     # A cookie jar is a live session: it must be gone once the run that used it ends.
     uploaded_cookies = json.loads(call('/api/upload?ext=.txt', raw=cookie_jar.read_bytes()))['file']
     assert (WORK/'data/uploads'/uploaded_cookies).is_file()

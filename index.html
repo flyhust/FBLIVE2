@@ -111,11 +111,12 @@ function clockLabel(seconds){if(!isFinite(seconds)||seconds<0)return null;second
 function renderSteps(stage){const box=$('progress-steps');box.replaceChildren();const at=STEPS.indexOf(stage);for(let i=0;i<STEPS.length;i++){const chip=el('span',(i+1)+'. '+STEPS[i]);if(at>=0&&i<at)chip.className='past';if(i===at)chip.className='now';box.append(chip)}}
 function renderProgress(job){
  const pct=job.progress;
- $('progress').classList.toggle('busy',pct===null);
- $('progress').style.width=pct===null?'100%':pct+'%';
- $('progress-pct').textContent=pct===null?'进行中':pct+'%';
- renderSteps(job.stage);
  const done=!['running','queued'].includes(job.status);
+ // A stopped run never shows a moving-looking bar, whatever progress it died at.
+ $('progress').classList.toggle('busy',pct===null&&!done);
+ $('progress').style.width=pct===null?(done?'0':'100%'):pct+'%';
+ $('progress-pct').textContent=pct===null?(done?'—':'进行中'):pct+'%';
+ renderSteps(job.stage);
  const elapsed=(Date.now()-new Date(job.created_at).getTime())/1000;
  const parts=['已用时 '+clockLabel(elapsed)];
  if(done){pace=null;parts.push(job.status==='done'?'任务结束':'任务已停止')}
