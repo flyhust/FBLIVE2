@@ -46,7 +46,15 @@ for url in ['file:///etc/passwd', 'https://evil.com/fb.watch', 'https://facebook
         raise AssertionError(url)
     except ValueError:
         pass
-print('PASS: real subtitle boundaries, plain text, timezone alignment, ID deduplication, missing values, URL boundary')
+cookie_jar = WORK / 'cookies.txt'
+cookie_jar.write_text('# Netscape HTTP Cookie File\n.facebook.com\tTRUE\t/\tTRUE\t0\tc_user\tnot-a-real-value\n', encoding='utf-8')
+app.check_cookie_file(cookie_jar)
+try:
+    app.check_cookie_file(WORK / 'plain.txt')
+    raise AssertionError('a transcript must not pass as a cookie jar')
+except ValueError:
+    pass
+print('PASS: real subtitle boundaries, plain text, timezone alignment, ID deduplication, missing values, URL boundary, cookie jar format')
 
 port = 18765
 process = subprocess.Popen([sys.executable, str(SRC), '--no-browser', '--port', str(port), '--data-dir', str(WORK/'data')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -92,9 +100,26 @@ try:
     assert '<script>malicious()</script>' not in html_export
     assert json.loads(call('/api/export/'+started['id']+'/json'))['transcript'][0]['text'] == segments[0]['text']
     assert (WORK/'data/runs'/started['id']/'report.html').is_file()
+    # A cookie jar is a live session: it must be gone once the run that used it ends.
+    uploaded_cookies = json.loads(call('/api/upload?ext=.txt', raw=cookie_jar.read_bytes()))['file']
+    assert (WORK/'data/uploads'/uploaded_cookies).is_file()
+    with_cookies = json.loads(call('/api/start', {'transcript':uploaded,'cookies':uploaded_cookies,'asr_model':'small','language':'','offset':0,'title':'cookies 清理检查（合成）'}))
+    for _ in range(100):
+        cookie_job = json.loads(call('/api/jobs/'+with_cookies['id']))
+        if cookie_job['status'] in ['failed','done']:
+            break
+        time.sleep(.1)
+    assert cookie_job['status'] == 'done', cookie_job
+    assert not (WORK/'data/uploads'/uploaded_cookies).exists(), 'cookie jar outlived its run'
+    assert uploaded_cookies not in json.dumps(cookie_job['report'], ensure_ascii=False), 'the jar must not be named in the report'
+    try:
+        call('/api/start', {'transcript':uploaded,'cookies':'../../etc/passwd','asr_model':'small','language':'','offset':0})
+        raise AssertionError('invalid cookies id accepted')
+    except HTTPError as error:
+        assert error.code == 400, error
     call('/api/shutdown', {})
     process.wait(timeout=10)
-    print('PASS: local HTTP start/upload/analyze/history/export/shutdown pipeline and API session checks')
+    print('PASS: local HTTP start/upload/analyze/history/export/shutdown pipeline, cookie cleanup and API session checks')
 finally:
     if process.poll() is None:
         process.terminate()

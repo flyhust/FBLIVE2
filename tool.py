@@ -242,7 +242,7 @@ def validate_fb_url(url):
     return url
 
 
-def download_media(url, directory, job_id):
+def download_media(url, directory, job_id, cookies=None):
     import yt_dlp
     last = [0.0]
     def hook(status):
@@ -263,6 +263,8 @@ def download_media(url, directory, job_id):
                "socket_timeout": 30, "retries": 2, "fragment_retries": 2,
                "outtmpl": str(directory / "media.%(ext)s"), "logger": QuietLogger(),
                "progress_hooks": [hook], "continuedl": True, "cachedir": str(DATA / "download-cache")}
+    if cookies:
+        options["cookiefile"] = str(cookies)
     with yt_dlp.YoutubeDL(options) as ydl:
         metadata = ydl.extract_info(validate_fb_url(url), download=False)
         if metadata.get("is_live"):
@@ -524,13 +526,29 @@ def attach_dashboard(report, profile=None):
     return report["dashboard"]
 
 
+def check_cookie_file(path):
+    """Fail early on the wrong file; never log or report what the jar contains."""
+    with path.open("r", encoding="utf-8", errors="replace") as file:
+        head = file.read(4096)
+    if "netscape http cookie file" not in head.lower() and "\t" not in head:
+        raise ValueError("Cookies 文件格式不对。请用浏览器扩展导出 Netscape 格式的 cookies.txt。")
+
+
+def upload_path_quiet(value):
+    try:
+        return upload_path(value)
+    except ValueError:
+        return None
+
+
 def run_pipeline(job_id, config):
     directory = DATA / "runs" / job_id
     with WORKER:
         try:
             check_cancel(job_id)
             update(job_id, status="running", stage="读取输入", progress=None, message="任务已开始")
-            transcript_path, media_path, comment_path = (upload_path(config.get(k)) for k in ("transcript", "media", "comments"))
+            transcript_path, media_path, comment_path, cookie_path = (
+                upload_path(config.get(k)) for k in ("transcript", "media", "comments", "cookies"))
             url = config.get("url", "").strip()
             metadata, warnings, transcription = {}, [], {}
             # A provided transcript takes precedence: avoid downloading/transcribing twice.
@@ -540,7 +558,10 @@ def run_pipeline(job_id, config):
             else:
                 if not media_path:
                     update(job_id, stage="检查直播链接", message="尝试获取公开可访问的直播录像。", progress=None)
-                    media_path, metadata = download_media(url, directory, job_id)
+                    if cookie_path:
+                        check_cookie_file(cookie_path)
+                        warnings.append("使用了你提供的 cookies 下载录像；工具以你的登录身份访问这条链接，任务结束后立即删除该文件。")
+                    media_path, metadata = download_media(url, directory, job_id, cookie_path)
                 transcript, transcription = transcribe(media_path, config["asr_model"], config.get("language"), job_id, directory)
             check_cancel(job_id)
             update(job_id, stage="整理逐字稿与留言", progress=None, message=f"已取得 {len(transcript)} 个逐字稿片段")
@@ -586,6 +607,11 @@ def run_pipeline(job_id, config):
             message = re.sub(r"https?://\S+", "[链接]", message)[:500]
             update(job_id, status="failed", stage="任务未完成", progress=None,
                    message=message + "。可导入本地 MP4／MP3／SRT／TXT 重试；已产生的逐字稿会保留。")
+        finally:
+            # The cookie jar carries a live session; it never outlives the run that used it.
+            jar = upload_path_quiet(config.get("cookies"))
+            if jar:
+                jar.unlink(missing_ok=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -742,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("请输入直播链接，或选择音视频／逐字稿文件。")
                 if config.get("url"):
                     validate_fb_url(config["url"].strip())
-                for name in ("media", "transcript", "comments"):
+                for name in ("media", "transcript", "comments", "cookies"):
                     upload_path(config.get(name))
                 profile_config(config)
                 if config.get("asr_model") not in ALLOWED_MODELS:
