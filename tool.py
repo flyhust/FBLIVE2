@@ -579,6 +579,7 @@ def run_pipeline(job_id, config):
             title = config.get("title", "").strip() or metadata.get("title") or "直播复盘 · " + datetime.now().strftime("%Y-%m-%d %H:%M")
             profile = profile_config(config)
             report = {"version": VERSION, "id": job_id, "created_at": utc_now(), "title": title, "url": url,
+                      "media_file": media_path.name if media_path and media_path.parent == directory else None,
                       "metadata": metadata, "transcription": transcription, "transcript": transcript, "comments": comments,
                       "analysis": analysis, "profile_config": profile, "warnings": warnings}
             update(job_id, stage="生成通用 Dashboard", progress=None, message="按直播类型与目标整理六个模块")
@@ -645,6 +646,23 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def stream_file(self, path: Path):
+        """A recording can be gigabytes; send it in chunks instead of reading it in."""
+        size = path.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+        self.end_headers()
+        try:
+            with path.open("rb") as file:
+                while chunk := file.read(1024 * 1024):
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def authorized(self):
         host = self.headers.get("Host", "")
         if host != f"127.0.0.1:{SERVER.server_port}":
@@ -708,6 +726,13 @@ class Handler(BaseHTTPRequestHandler):
                 if report_path.exists():
                     job["report"] = json.loads(report_path.read_text(encoding="utf-8"))
                 return self.respond(job)
+            m = re.fullmatch(r"/api/export/([a-f0-9]{16})/media", path)
+            if m:
+                run = DATA / "runs" / m[1]
+                found = [f for f in run.glob("media.*") if f.suffix not in (".part", ".ytdl")]
+                if not found:
+                    raise ValueError("这次任务没有下载音视频（使用了本地文件或已有逐字稿）。")
+                return self.stream_file(found[0])
             m = re.fullmatch(r"/api/export/([a-f0-9]{16})/(txt|srt|json|md|html)", path)
             if m:
                 job_id, kind = m[1], m[2]
