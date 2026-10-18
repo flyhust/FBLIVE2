@@ -710,6 +710,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond({"models": [x["name"] for x in models], "available": True})
                 except Exception:
                     return self.respond({"models": [], "available": False})
+            if path == "/api/comment-script":
+                return self.respond((ROOT / "scripts" / "collect-comments.js").read_text(encoding="utf-8"),
+                                    content_type="text/plain; charset=utf-8")
             if path == "/api/templates":
                 return self.respond({"goals": dashboard.GOALS,
                                      "types": [{"id": k, "label": v["label"], "goals": v["goals"], "verified": v["verified"]}

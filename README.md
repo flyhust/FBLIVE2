@@ -57,6 +57,21 @@ Vercel 部署目录为 `web/`，不上传模型、录像、EXE、会话令牌或
 
 导入 SRT/VTT 时保留真实起止时间；纯文本没有时间戳也可分析，但不会编造时间。只有全部片段有真实起止时间时才提供 SRT 导出。
 
+## 取得留言
+
+链接拿不到留言，下载器也不行。我试过 `facebook-scraper`：它依赖的 `m.facebook.com` 和 `mbasic.facebook.com` 现在直接返回 HTTP 400，对公开主页也返回 0 条，所以没有采用。
+
+现在的做法是浏览器脚本 [`scripts/collect-comments.js`](scripts/collect-comments.js)：
+
+1. 在工具里点「留言 CSV」旁边的**复制留言采集脚本**
+2. 到你能正常看到留言的 Facebook 视频／贴文页面，按 F12 打开 Console，粘贴回车
+3. 脚本会反复点开「查看更多留言」和回复，然后下载一份 CSV
+4. 回到工具选这个 CSV，并在「高级设置」里填直播开始时间（含时区）
+
+脚本只读页面上已经渲染的内容，不调接口、不外发数据、不点赞或回复。导出的时间是留言发布时间，换算成直播内的分秒要靠直播开始时间；认不出的时间格式保持为空，工具会标成未对齐而不是猜一个。Facebook 的页面结构随时会变，采不到时需要改脚本里的选择器。
+
+如果这场直播在你自己管理的专页上，用 Graph API 取 `/{video-id}/comments` 和 `/reactions` 比脚本稳定得多。
+
 ## 留言格式
 
 CSV 内容列支持 `text`、`comment`、`message`、`留言`、`内容`；时间列支持 `timestamp`、`created_time`、`time`、`时间`、`相对时间`、`发布时间`。可选列：`id` / `comment_id`、`user_id` / `username`、`parent_id`。

@@ -56,6 +56,12 @@ except ValueError:
     pass
 print('PASS: real subtitle boundaries, plain text, timezone alignment, ID deduplication, missing values, URL boundary, cookie jar format')
 
+COLLECTED_CSV = '\n'.join([
+    'id,timestamp,text,user_id,role,parent_id',
+    '"555001","2026-10-18T17:05:00+08:00","多少钱","100011112222","",""',
+    '"555002","2026-10-18T17:09:00+08:00","请看留言区","page-9","host","555001"',
+]) + '\n'
+
 port = 18765
 process = subprocess.Popen([sys.executable, str(SRC), '--no-browser', '--port', str(port), '--data-dir', str(WORK/'data')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 base = f'http://127.0.0.1:{port}'
@@ -108,6 +114,14 @@ try:
         assert error.code == 400, error
     (WORK/'data/runs'/started['id']/'media.m4a').write_bytes(b'synthetic audio bytes')
     assert call('/api/export/'+started['id']+'/media') == b'synthetic audio bytes'
+    script = call('/api/comment-script').decode('utf-8')
+    assert 'role="article"' in script and 'parent_id' in script, 'the collector script must be served intact'
+    # The CSV that script writes must align, and keep roles and reply links.
+    produced = WORK / 'collected.csv'
+    produced.write_text(COLLECTED_CSV, encoding='utf-8-sig')
+    collected, _ = app.parse_comments(produced, '2026-10-18T17:00:00+08:00', 0, 'job')
+    assert [row['start'] for row in collected] == [300, 540], collected
+    assert collected[1]['role'] == 'host' and collected[1]['parent_id'] == '555001'
     # A cookie jar is a live session: it must be gone once the run that used it ends.
     uploaded_cookies = json.loads(call('/api/upload?ext=.txt', raw=cookie_jar.read_bytes()))['file']
     assert (WORK/'data/uploads'/uploaded_cookies).is_file()
