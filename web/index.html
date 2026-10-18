@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Notes · 直播分析工作台</title>
+<meta name="description" content="连接本机工具，生成 Facebook 直播逐字稿，分析内容、风格与观众留言。">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="/app.css">
+<script src="/bridge.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">live<span>notes.</span></div><div class="eyebrow" style="margin-top:5px">直播分析工作台</div>
+  <nav><button id="nav-work" class="active" data-action="showPage('work')">◉　分析工作台</button><button id="nav-history" data-action="showPage('history')">▤　本地历史</button></nav>
+  <div class="note" style="font-size:11px">内容、逐字稿与报告<br>由本机工具处理与保存</div>
+  <div class="side-bottom"><span class="local-dot"></span>网页控制台 · 本机处理<br><p>初次转录需要联网下载语音模型；链接获取也需要网络。</p><button id="shutdown-worker" class="small" data-action="quitTool()" disabled>关闭本机工具</button></div>
+</aside>
+<main>
+ <div class="topbar"><div><div class="eyebrow">YOUR LIVE. CLEARER.</div><h1>把每一场直播，变成下一场的经验。</h1><p class="sub">生成逐字稿，回看内容结构、表达风格和观众回应，找到有依据的改进方向。</p></div><span id="connection-state" class="pill offline" role="status" aria-live="polite">尚未连接本机工具</span></div>
+
+ <section class="card connection-card" aria-labelledby="connection-title">
+  <div class="card-heading"><div><div class="eyebrow">YOUR COMPUTER, YOUR DATA</div><h2 id="connection-title">连接这台电脑上的工具</h2></div><button id="disconnect" class="small hidden" data-action="disconnectWorker()">断开网页连接</button></div>
+  <p class="hint">网页由 Vercel 提供。下载录像、生成逐字稿与分析都在你的电脑上运行；使用时请保持本地工具开启。</p>
+  <div id="connection-message" class="note" role="status" aria-live="polite">正在准备连接界面…</div>
+  <div id="connected-address" class="path"></div>
+  <details id="connection-details" open><summary>配对／重新连接本机工具</summary>
+   <div class="field" style="margin-top:16px"><label for="pairing-url">本地工具提供的完整配对链接</label><input id="pairing-url" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴本地工具打开的完整网页链接（包含 #bridge=…&amp;token=…）"><div class="fine">配对链接包含临时连接令牌，请只粘贴在本页，勿发送给他人。</div></div>
+   <details><summary>手动填写本机地址与连接令牌</summary><div class="grid2" style="margin-top:16px"><div class="field"><label for="worker-url">本机地址</label><input id="worker-url" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:端口"></div><div class="field"><label for="worker-token">本次启动的连接令牌</label><input id="worker-token" type="password" autocomplete="off" spellcheck="false" placeholder="本地工具提供的 48 位字符"></div></div></details>
+   <div class="row" style="margin-top:16px"><button id="connect" class="primary" data-action="connectWorker()">连接本机工具</button><span class="fine">若浏览器询问本地网络访问权限，请允许。本页仅连接你指定的 127.0.0.1 地址。</span></div>
+  </details>
+ </section>
+ <section id="page-work">
+  <div class="banner"><div class="eyebrow">FROM LINK TO INSIGHT</div><h2 style="font-size:23px;margin:8px 0">一条链接，一份完整逐字稿。</h2><p>输入 Facebook 直播录像链接，或导入本地音视频／字幕。工具会在本机转录、整理证据并生成复盘，支持导出报告和带时间戳字幕。</p></div>
+  <div class="card">
+   <div class="card-heading"><h2><span class="step">01</span>放入这场直播</h2><span class="hint">直播结束后的录像</span></div>
+   <div class="grid2"><div class="field"><label for="url">Facebook 链接</label><input id="url" type="url" placeholder="https://www.facebook.com/… 或 https://fb.watch/…"></div><div class="field"><label for="title">直播名称 <span class="muted">· 可选</span></label><input id="title" placeholder="例如：10 月新品介绍"></div></div>
+   <div class="grid3">
+    <div class="filebox"><label for="media">本地视频／音频</label><input id="media" type="file" accept=".mp4,.mkv,.mov,.webm,.mp3,.m4a,.wav,.flac,.ogg,.aac"><p>无法获取链接时，直接导入录像。文件最大 4GB。</p></div>
+    <div class="filebox"><label for="transcript">已有逐字稿 <span class="muted">· 可选</span></label><input id="transcript" type="file" accept=".srt,.vtt,.txt,.json"><p>优先使用已有逐字稿，避免重复转录。无时间戳文本也可分析。</p></div>
+    <div class="filebox"><label for="comments">留言 CSV <span class="muted">· 可选</span></label><input id="comments" type="file" accept=".csv"><p>支持 text / message / 留言、timestamp / 时间、user_id、parent_id。</p></div>
+   </div>
+   <details><summary>转录与分析设置</summary><div class="grid3" style="margin-top:18px">
+    <div class="field"><label for="asr-model">语音模型</label><select id="asr-model"><option value="small">small · 中文较稳，首次约 500MB</option><option value="base">base · 较快，首次约 150MB</option><option value="tiny">tiny · 快速试用，首次约 75MB</option><option value="medium">medium · 较慢，首次约 1.5GB</option><option value="large-v3">large-v3 · 更高要求，首次约 3GB</option></select></div>
+    <div class="field"><label for="language">语音语言</label><select id="language"><option value="">自动检测</option value="zh">中文</option><option value="en">英语</option><option value="ms">马来语</option><option value="yue">粤语</option><option value="ja">日语</option><option value="ko">韩语</option></select></div>
+    <div class="field"><label for="local-model">本地 AI 模型 <span class="muted">· 可选增强</span></label><select id="local-model"><option value="">规则初筛（无需语言模型）</option></select><div class="fine" id="model-note">连接本机工具后，可查看已安装的本地 AI 模型。</div></div>
+    <div class="field"><label for="start-time">直播开始时间 <span class="muted">· 对齐留言</span></label><input id="start-time" placeholder="2026-10-18T15:00:00+08:00"></div>
+    <div class="field"><label for="offset">录像开头裁剪秒数</label><input id="offset" type="number" value="0"><div class="fine">正数：录像开头被剪掉的长度。</div></div>
+   </div><p class="fine">逐字稿用于内容和语言风格分析，不据此推断声调、表情或镜头表现。接入本机 Ollama 后可生成更深入的语义复盘；未接入时，显示可复核的关键词线索和改进提示。</p></details>
+   <div class="row" style="margin-top:22px"><button id="start" class="primary" disabled data-action="startJob()">开始转录与分析　↗</button><span class="hint">无需 API Key · 转录在本机进行</span></div>
+   <div id="input-error" class="note error hidden"></div>
+  </div>
+  <div id="status" class="card hidden"><div class="card-heading"><h2 id="status-stage">任务处理中</h2><button id="cancel" class="small" data-action="cancelJob()">取消任务</button></div><div class="progress-track"><div id="progress"></div></div><div id="status-message" class="hint"></div><div class="fine" style="margin-top:9px">关掉网页或断开网页连接不会停止任务。需要停止本机程序时，请点击左侧「关闭本机工具」。</div></div>
+  <div id="report-area" class="hidden">
+   <div class="card" style="margin-bottom:14px"><div class="card-heading"><div><div class="eyebrow">LIVE REVIEW</div><h2 id="report-title" class="report-title"></h2><div id="report-meta" class="hint"></div></div><span id="analysis-type" class="pill"></span></div><div id="summary" class="source-summary"></div><div id="warnings"></div></div>
+   <div class="metrics" id="metrics"></div>
+   <div class="downloads row" id="downloads"></div>
+   <div class="tabs"><button id="tab-analysis" class="active" data-action="setTab('analysis')">内容与风格</button><button id="tab-transcript" data-action="setTab('transcript')">完整逐字稿</button><button id="tab-audience" data-action="setTab('audience')">观众与互动</button></div>
+   <div id="view-analysis"><div class="card"><h2>直播风格线索</h2><div id="style"></div><div id="signals" style="margin-top:15px"></div></div><div class="grid2"><div class="card strength"><h2>＋　值得保留</h2><div id="strengths"></div></div><div class="card weakness"><h2>↗　需要改善</h2><div id="weaknesses"></div></div></div><div class="card"><h2>下一场怎么改</h2><div id="actions"></div></div><div class="fine" id="limitations"></div></div>
+   <div id="view-transcript" class="card hidden"><div class="toolbar"><h2 style="margin:0">完整逐字稿</h2><input id="transcript-search" placeholder="搜索逐字稿内容或证据编号"></div><div id="transcript-info" class="hint"></div><div id="segments"></div><button id="more-segments" class="small" style="margin-top:16px" data-action="segmentLimit+=150;renderTranscript()">显示更多片段</button></div>
+   <div id="view-audience" class="hidden"><div class="card"><h2>每分钟留言</h2><div id="chart-empty" class="hint"></div><canvas id="chart" height="220"></canvas><p class="legend">仅使用有真实时间戳的已导入留言；整场总数无法还原分时变化。</p><div id="highlights"></div></div><div class="card"><h2>观众留言</h2><input id="comment-search" placeholder="搜索留言内容"><div id="comment-list"></div><button id="more-comments" class="small" style="margin-top:16px" data-action="commentLimit+=100;renderComments()">显示更多留言</button></div></div>
+  </div>
+  <div id="empty" class="card empty"><div class="big">▥</div><h2>准备好回看这一场。</h2><p>添加直播链接、音视频或逐字稿后，就能开始。<br>没有取得的数据会显示「未取得」，不会补造。</p></div>
+ </section>
+ <section id="page-history" class="hidden"><div class="card"><div class="card-heading"><h2>本地分析记录</h2><button class="small" data-action="loadHistory()">刷新记录</button></div><div id="history-list"></div></div><div class="note">逐字稿、报告、音视频和模型保存在工具旁的 FB_Live_Data 文件夹。删除该文件夹会清除本地记录与模型缓存。</div><div class="path" id="data-path"></div></section>
+ <div class="fine" style="margin-top:35px">LIVE NOTES · 网页控制台 + 本机工作台　<span class="tool-separator">/</span>　Facebook 访问条件可能限制下载；此时可直接导入已有录像。自动逐字稿中的人名、数字和混合语言请回听核对。</div>
+</main>
+<div id="toast" class="toast hidden"></div>
+
+</body>
+</html>

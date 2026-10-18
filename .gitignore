@@ -21,6 +21,7 @@ cookies*.txt
 build/
 dist/
 .venv/
+.vercel/
 .build-env/
 __pycache__/
 *.py[cod]

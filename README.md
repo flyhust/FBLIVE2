@@ -2,6 +2,12 @@
 
 Windows 本地工具，输入 Facebook 直播录像链接，或导入本地音视频／逐字稿，生成带时间戳的完整逐字稿与可追溯的内容复盘。
 
+## Vercel 网页工作台（1.1）
+
+网页位于 https://fb-live-analyzer.vercel.app 。网页托管在 Vercel，下载、转录、分析及文件保存仍在本机。完整解压 Online 版本后，运行 `Start-Online.cmd` 自动启动并配对；旧版 EXE 不支持网页连接。详见 [线上工作台使用说明](线上工作台使用说明.md)。
+
+Vercel 部署目录为 `web/`，不上传模型、录像、EXE、会话令牌或分析历史。源码方式可运行 `python tool.py --portal https://fb-live-analyzer.vercel.app`；在线打包使用 `build.ps1 -Online`。本地处理程序仅监听 127.0.0.1，只有指定网站来源及正确会话令牌才能调用 API。
+
 ## 本地使用
 
 打包完成后，双击 `FB-Live-Analyzer.exe`，会自动打开本机浏览器界面。无需安装 Python，无需 API Key。源码运行方式见下文。

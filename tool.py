@@ -25,10 +25,10 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import URLError
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 DATA: Path
 TOKEN = secrets.token_hex(24)
@@ -37,12 +37,29 @@ LOCK = threading.RLock()
 WORKER = threading.Semaphore(1)
 CANCEL: dict[str, threading.Event] = {}
 SERVER: ThreadingHTTPServer
+PORTAL_ORIGIN: str | None = None
 ALLOWED_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 UPLOAD_SUFFIXES = {".mp4", ".mkv", ".webm", ".mov", ".m4a", ".mp3", ".wav", ".ogg", ".flac", ".aac", ".txt", ".srt", ".vtt", ".json", ".csv"}
 
 
 class Cancelled(Exception):
     pass
+
+
+def normalize_portal_origin(value: str) -> str:
+    """Allow one explicitly selected HTTPS website to connect to the loopback worker."""
+    try:
+        parsed = urlsplit(value.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("线上工作台地址格式无效。") from exc
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment or port not in (None, 443)):
+        raise ValueError("线上工作台须为完整 HTTPS 网站地址，不带路径、查询参数或登录信息。")
+    host = parsed.hostname.encode("idna").decode("ascii").lower()
+    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost"):
+        raise ValueError("--portal 用于线上网站；本机界面请直接启动程序。")
+    return "https://" + host
 
 
 def utc_now():
@@ -506,6 +523,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Vary", "Origin")
+        if PORTAL_ORIGIN and origin == PORTAL_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", PORTAL_ORIGIN)
+            if self.command == "OPTIONS":
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Session-Token")
+                self.send_header("Access-Control-Max-Age", "600")
+                if self.headers.get("Access-Control-Request-Private-Network", "").lower() == "true":
+                    self.send_header("Access-Control-Allow-Private-Network", "true")
         if filename:
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.end_headers()
@@ -519,14 +547,31 @@ class Handler(BaseHTTPRequestHandler):
         if host != f"127.0.0.1:{SERVER.server_port}":
             self.respond({"error": "本工具仅通过本机地址访问。"}, 403)
             return False
+        origin = self.headers.get("Origin")
+        local_origin = f"http://127.0.0.1:{SERVER.server_port}"
+        if origin and origin not in (local_origin, PORTAL_ORIGIN):
+            self.respond({"error": "此网站尚未与本机工具配对，请使用线上工作台启动器。"}, 403)
+            return False
         u = urlsplit(self.path)
-        if u.path == "/":
+        if PORTAL_ORIGIN and origin == PORTAL_ORIGIN and u.path == "/":
+            self.respond({"error": "请通过本机启动器提供的连接信息配对。"}, 403)
+            return False
+        if self.command == "GET" and u.path == "/":
             return True
         token = self.headers.get("X-Session-Token", "") or parse_qs(u.query).get("token", [""])[0]
         if not secrets.compare_digest(str(token), TOKEN):
             self.respond({"error": "会话已失效，请刷新本地页面。"}, 403)
             return False
         return True
+
+    def do_OPTIONS(self):
+        requested = {h.strip().lower() for h in self.headers.get("Access-Control-Request-Headers", "").split(",") if h.strip()}
+        if (self.headers.get("Host", "") != f"127.0.0.1:{SERVER.server_port}"
+                or not PORTAL_ORIGIN or self.headers.get("Origin") != PORTAL_ORIGIN
+                or self.headers.get("Access-Control-Request-Method", "") not in ("GET", "POST")
+                or not requested.issubset({"content-type", "x-session-token"})):
+            return self.respond({"error": "未允许此网站连接本机工具。"}, 403)
+        self.respond(b"", status=204)
 
     def do_GET(self):
         if not self.authorized():
@@ -536,7 +581,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/":
                 return self.respond((ROOT / "index.html").read_text(encoding="utf-8").replace("__SESSION_TOKEN__", TOKEN), content_type="text/html; charset=utf-8")
             if path == "/api/health":
-                return self.respond({"version": VERSION, "data_dir": str(DATA), "transcriber": importlib.util.find_spec("faster_whisper") is not None})
+                return self.respond({"version": VERSION, "bridge_protocol": 1, "portal_origin": PORTAL_ORIGIN,
+                                     "data_dir": str(DATA), "transcriber": importlib.util.find_spec("faster_whisper") is not None})
             if path == "/api/models":
                 try:
                     models = ollama_request("/api/tags").get("models", [])
@@ -648,13 +694,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global DATA, SERVER
+    global DATA, SERVER, PORTAL_ORIGIN
     parser = argparse.ArgumentParser(description="Local Facebook Live transcript and review tool")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--check-runtime", action="store_true")
+    parser.add_argument("--portal", type=normalize_portal_origin,
+                        help="Exact HTTPS origin of the Vercel webpage; opens a paired browser workspace")
     args = parser.parse_args()
+    PORTAL_ORIGIN = args.portal
     if args.check_runtime:
         import yt_dlp
         import av
@@ -690,8 +739,13 @@ def main():
     SERVER.daemon_threads = True
     url = f"http://127.0.0.1:{SERVER.server_port}/"
     (DATA / "local-address.txt").write_text(url, encoding="utf-8")
+    launch_url = url
+    if PORTAL_ORIGIN:
+        launch_url = PORTAL_ORIGIN + "/#" + urlencode({"bridge": url.rstrip("/"), "token": TOKEN})
+        # The fragment stays in the browser; it is not sent to Vercel with the page request.
+        (DATA / "online-workspace-link.txt").write_text(launch_url, encoding="utf-8")
     if not args.no_browser:
-        webbrowser.open(url)
+        webbrowser.open(launch_url)
     SERVER.serve_forever(poll_interval=0.25)
     SERVER.server_close()
 
